@@ -1,6 +1,5 @@
 import os
 import yaml
-import base64
 from crewai import Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task
 from src.tools import (
@@ -9,18 +8,25 @@ from src.tools import (
     DietaryFilterTool,
     NutrientAnalysisTool
 )
-from ibm_watsonx_ai import Credentials, APIClient
-from src.models import RecipeSuggestionOutput, NutrientAnalysisOutput 
+from src.models import RecipeSuggestionOutput, NutrientAnalysisOutput
+from langchain_google_genai import ChatGoogleGenerativeAI
+from dotenv import load_dotenv
 
-credentials = Credentials(
-                   url = "https://us-south.ml.cloud.ibm.com",
-                   # api_key = "<YOUR_API_KEY>" # Normally you'd put an API key here, but we've got you covered here
-                  )
-client = APIClient(credentials)
-project_id = "skills-network"
+# Load environment variables
+load_dotenv()
 
 # Get the absolute path to the config directory
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), "config")
+
+# Initialize Google Gemini LLM for agents
+def get_gemini_llm(temperature: float = 0.7):
+    """Initialize Google Gemini LLM"""
+    return ChatGoogleGenerativeAI(
+        model="gemini-1.5-flash",
+        temperature=temperature,
+        google_api_key=os.getenv("GOOGLE_API_KEY")
+    )
+
 
 @CrewBase
 class BaseNourishBotCrew:
@@ -29,7 +35,7 @@ class BaseNourishBotCrew:
     
     def __init__(self, image_data, dietary_restrictions: str = None):
         self.image_data = image_data
-        self.dietary_restrictions = dietary_restrictions
+        self.dietary_restrictions = dietary_restrictions if dietary_restrictions else ""
 
         with open(self.agents_config_path, 'r') as f:
             self.agents_config = yaml.safe_load(f)
@@ -45,6 +51,7 @@ class BaseNourishBotCrew:
                 ExtractIngredientsTool.extract_ingredient, 
                 FilterIngredientsTool.filter_ingredients
             ],
+            llm=get_gemini_llm(temperature=0.5),
             allow_delegation=False,
             max_iter=5,
             verbose=True
@@ -55,8 +62,9 @@ class BaseNourishBotCrew:
         return Agent(
             config=self.agents_config['dietary_filtering_agent'],
             tools=[DietaryFilterTool.filter_based_on_restrictions],
-            allow_delegation=True,
-            max_iter=6,
+            llm=get_gemini_llm(temperature=0.3),
+            allow_delegation=False,
+            max_iter=3,
             verbose=True
         )
 
@@ -65,6 +73,7 @@ class BaseNourishBotCrew:
         return Agent(
             config=self.agents_config['nutrient_analysis_agent'],
             tools=[NutrientAnalysisTool.analyze_image],
+            llm=get_gemini_llm(temperature=0.5),
             allow_delegation=False,
             max_iter=4,
             verbose=True
@@ -74,7 +83,9 @@ class BaseNourishBotCrew:
     def recipe_suggestion_agent(self) -> Agent:
         return Agent(
             config=self.agents_config['recipe_suggestion_agent'],
+            llm=get_gemini_llm(temperature=0.8),
             allow_delegation=False,
+            max_iter=5,
             verbose=True
         )
 
@@ -95,12 +106,8 @@ class BaseNourishBotCrew:
         return Task(
             description=task_config['description'],
             agent=self.dietary_filtering_agent(),
-            depends_on=['ingredient_detection_task'],
-            input_data=lambda outputs: {
-                'ingredients': outputs['ingredient_detection_task'],
-                'dietary_restrictions': self.dietary_restrictions
-            },
-            expected_output=task_config['expected_output']
+            expected_output=task_config['expected_output'],
+            context=[self.ingredient_detection_task()]
         )
 
     @task
@@ -121,12 +128,9 @@ class BaseNourishBotCrew:
         return Task(
             description=task_config['description'],
             agent=self.recipe_suggestion_agent(),
-            depends_on=['dietary_filtering_task'],
-            input_data=lambda outputs: {
-                'filtered_ingredients': outputs['dietary_filtering_task']
-            },
             expected_output=task_config['expected_output'],
-            output_json=RecipeSuggestionOutput
+            output_json=RecipeSuggestionOutput,
+            context=[self.dietary_filtering_task()]
         )
 
 
@@ -135,21 +139,18 @@ class NourishBotRecipeCrew(BaseNourishBotCrew):
 
     @crew
     def crew(self) -> Crew:
-        tasks = [
-            self.ingredient_detection_task(),
-            self.dietary_filtering_task(),
-            self.recipe_suggestion_task()
-        ]
-
-        agents = [
-            self.ingredient_detection_agent(),
-            self.dietary_filtering_agent(),
-            self.recipe_suggestion_agent()
-        ]
-
+        """Recipe generation workflow"""
         return Crew(
-            agents=agents,
-            tasks=tasks,
+            agents=[
+                self.ingredient_detection_agent(),
+                self.dietary_filtering_agent(),
+                self.recipe_suggestion_agent()
+            ],
+            tasks=[
+                self.ingredient_detection_task(),
+                self.dietary_filtering_task(),
+                self.recipe_suggestion_task()
+            ],
             process=Process.sequential,
             verbose=True
         )
@@ -160,17 +161,14 @@ class NourishBotAnalysisCrew(BaseNourishBotCrew):
 
     @crew
     def crew(self) -> Crew:
-        tasks = [
-            self.nutrient_analysis_task(),
-        ]
-
-        agents = [
-            self.nutrient_analysis_agent(),
-        ]
-
+        """Nutritional analysis workflow"""
         return Crew(
-            agents=agents,
-            tasks=tasks,
+            agents=[
+                self.nutrient_analysis_agent(),
+            ],
+            tasks=[
+                self.nutrient_analysis_task(),
+            ],
             process=Process.sequential,
             verbose=True
         )
