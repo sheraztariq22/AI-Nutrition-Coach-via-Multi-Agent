@@ -1,7 +1,17 @@
 import gradio as gr
 import base64
 import time
+import os
+from dotenv import load_dotenv
 from src.crew import NourishBotRecipeCrew, NourishBotAnalysisCrew
+
+# Load environment variables
+load_dotenv()
+
+# Verify Google API key is set
+if not os.getenv("GOOGLE_API_KEY"):
+    raise ValueError("GOOGLE_API_KEY not found in .env file. Please add your Google API key.")
+
 
 def format_recipe_output(final_output):
     """
@@ -39,9 +49,10 @@ def format_recipe_output(final_output):
             output += f"**Calorie Estimate:** {recipe['calorie_estimate']} kcal\n\n"
             output += "---\n\n"
     else:
-        output += "No recipes could be generated."
+        output += "No recipes could be generated. Please try with a different image."
     
     return output
+
 
 def format_analysis_output(final_output):
     """
@@ -106,7 +117,7 @@ def format_analysis_output(final_output):
 
 def analyze_food(image, dietary_restrictions, workflow_type, progress=gr.Progress(track_tqdm=True)):
     """
-    Wrapper function for the Gradio interface.
+    Wrapper function for the Gradio interface with error handling.
     
     :param image: Uploaded image (PIL format)
     :param dietary_restrictions: Dietary restriction as a string (e.g., "vegan")
@@ -114,40 +125,70 @@ def analyze_food(image, dietary_restrictions, workflow_type, progress=gr.Progres
     :return: Result from the NourishBot workflow.
     """
     
-    image.save("uploaded_image.jpg")  # Save the uploaded image temporarily
-    image_path = "uploaded_image.jpg"
+    try:
+        # Validate inputs
+        if image is None:
+            return "❌ **Error:** Please upload an image."
+        
+        if not workflow_type:
+            return "❌ **Error:** Please select a workflow type (recipe or analysis)."
+        
+        # Save the uploaded image temporarily
+        image.save("uploaded_image.jpg")
+        image_path = "uploaded_image.jpg"
 
-    inputs = {
-        'uploaded_image': image_path,
-        'dietary_restrictions': dietary_restrictions,
-        'workflow_type': workflow_type
-    }
+        inputs = {
+            'uploaded_image': image_path,
+            'dietary_restrictions': dietary_restrictions if dietary_restrictions else "",
+            'workflow_type': workflow_type
+        }
+        
+        # Initialize the appropriate crew instance based on workflow type
+        if workflow_type == "recipe":
+            progress(0.1, desc="Initializing recipe generation...")
+            crew_instance = NourishBotRecipeCrew(
+                image_data=image_path,
+                dietary_restrictions=dietary_restrictions
+            )
+        elif workflow_type == "analysis":
+            progress(0.1, desc="Initializing nutritional analysis...")
+            crew_instance = NourishBotAnalysisCrew(
+                image_data=image_path
+            )
+        else:
+            return "❌ **Error:** Invalid workflow type. Choose 'recipe' or 'analysis'."
+
+        # Run the crew workflow and get the result
+        progress(0.3, desc="Processing your request...")
+        crew_obj = crew_instance.crew()
+        
+        progress(0.5, desc="Analyzing image with AI...")
+        final_output = crew_obj.kickoff(inputs=inputs)
+        
+        progress(0.9, desc="Formatting results...")
+        final_output = final_output.to_dict()
+
+        # Format output based on workflow type
+        if workflow_type == "recipe":
+            result = format_recipe_output(final_output)
+        elif workflow_type == "analysis":
+            result = format_analysis_output(final_output)
+        
+        progress(1.0, desc="Complete!")
+        return result
     
-    # Initialize the appropriate crew instance based on workflow type
-    if workflow_type == "recipe":
-        crew_instance = NourishBotRecipeCrew(
-            image_data=image_path,
-            dietary_restrictions=dietary_restrictions
-        )
-    elif workflow_type == "analysis":
-        crew_instance = NourishBotAnalysisCrew(
-            image_data=image_path
-        )
-    else:
-        return "Invalid workflow type. Choose 'recipe' or 'analysis'."
+    except FileNotFoundError as e:
+        return f"❌ **File Error:** {str(e)}"
+    except KeyError as e:
+        return f"❌ **Configuration Error:** Missing key {str(e)}. Please check your config files."
+    except Exception as e:
+        error_msg = f"❌ **Error:** {str(e)}\n\n"
+        error_msg += "**Troubleshooting:**\n"
+        error_msg += "- Ensure your Google API key is correctly set in the .env file\n"
+        error_msg += "- Check that the image is a valid food image\n"
+        error_msg += "- Try a different image or workflow type\n"
+        return error_msg
 
-    # Run the crew workflow and get the result
-    crew_obj = crew_instance.crew()
-    final_output = crew_obj.kickoff(inputs=inputs)
-
-    final_output = final_output.to_dict()
-
-    if workflow_type == "recipe":
-        recipe_markdown = format_recipe_output(final_output)
-        return recipe_markdown
-    elif workflow_type == "analysis":
-        nutrient_markdown = format_analysis_output(final_output)
-        return nutrient_markdown
     
 # Define custom CSS for styling
 css = """
@@ -196,6 +237,7 @@ function createGradioAnimation() {
     return 'Animation created';
 }
 """
+
 # Use a theme and custom CSS with Blocks
 with gr.Blocks(theme=gr.themes.Citrus(), css=css, js=js) as demo:
     gr.Markdown("# How it works", elem_classes="title")
@@ -207,9 +249,9 @@ with gr.Blocks(theme=gr.themes.Citrus(), css=css, js=js) as demo:
         with gr.Column(scale=1, min_width=400):
             gr.Markdown("## Inputs", elem_classes="title")
             image_input = gr.Image(type="pil", label="Upload Image")
-            dietary_input = gr.Textbox(label="Dietary Restrictions (optional)", placeholder="e.g., vegan")
-            workflow_radio = gr.Radio(["recipe", "analysis"], label="Workflow Type")
-            submit_btn = gr.Button("Analyze")
+            dietary_input = gr.Textbox(label="Dietary Restrictions (optional)", placeholder="e.g., vegan, keto, gluten-free")
+            workflow_radio = gr.Radio(["recipe", "analysis"], label="Workflow Type", value="recipe")
+            submit_btn = gr.Button("Analyze", variant="primary")
         
         with gr.Column(scale=2, min_width=600):
             # Place Examples directly under the Analyze button
@@ -221,15 +263,13 @@ with gr.Blocks(theme=gr.themes.Citrus(), css=css, js=js) as demo:
                     ["examples/food-4.jpg", "", "analysis"],
                 ],
                 inputs=[image_input, dietary_input, workflow_radio],
-                label="Try an Example: Select one of the examples below to autofil the input section then click Analyze"
-                # No function or outputs provided, so it only autofills inputs
+                label="Try an Example: Select one of the examples below to autofill the input section then click Analyze"
             )
             gr.Markdown("## Results will appear here...", elem_classes="title")
-            # result_display = gr.Markdown(height=800, )
             result_display = gr.Markdown(
                 "<div style='border: 1px solid #ccc; "
                 "padding: 1rem; text-align: center; "
-                "color: #666;'>No results yet</div>",
+                "color: #666;'>No results yet. Upload an image and click Analyze!</div>",
                 height=500
             )
 
@@ -241,4 +281,4 @@ with gr.Blocks(theme=gr.themes.Citrus(), css=css, js=js) as demo:
 
 # Launch the Gradio interface
 if __name__ == "__main__":
-    demo.launch(server_name="127.0.0.1", server_port=5000)
+    demo.launch(server_name="127.0.0.1", server_port=5000, share=True)
