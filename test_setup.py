@@ -15,7 +15,7 @@ if api_key:
         
         # Test API connection with correct model name
         print("\n🔄 Testing Gemini API connection...")
-        model = genai.GenerativeModel('gemini-2.5-flash')  # Correct: no 'models/' prefix
+        model = genai.GenerativeModel('gemini-1.5-flash')  # Correct: no 'models/' prefix
         response = model.generate_content("Say hello in one sentence!")
         print("✓ Google Gemini API working!")
         print(f"✓ Response: {response.text}")

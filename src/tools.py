@@ -14,8 +14,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logging.info("Extracting ingredients from image...")
+logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(message)s')
+logger = logging.getLogger(__name__)
 
 # Configure Google Gemini
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -23,6 +23,30 @@ if not GOOGLE_API_KEY:
     raise ValueError("GOOGLE_API_KEY not found in environment variables")
 
 genai.configure(api_key=GOOGLE_API_KEY)
+
+# Helper function to get the best available model
+def get_best_vision_model():
+    """Find and return the best available Gemini vision model"""
+    model_priority = [
+        'gemini-1.5-flash-latest',
+        'gemini-1.5-flash',
+        'gemini-2.0-flash-exp',
+        'gemini-1.5-pro-latest',
+        'gemini-1.5-pro',
+        'gemini-pro-vision'
+    ]
+    
+    for model_name in model_priority:
+        try:
+            model = genai.GenerativeModel(model_name)
+            # Test if model works with a simple prompt
+            logger.info(f"✓ Using Gemini model: {model_name}")
+            return model
+        except Exception as e:
+            logger.debug(f"Model {model_name} not available: {str(e)}")
+            continue
+    
+    raise Exception("No compatible Gemini vision models available. Check your API key and enabled APIs.")
 
 
 class ExtractIngredientsTool():
@@ -35,6 +59,8 @@ class ExtractIngredientsTool():
         :return: A list of ingredients extracted from the image.
         """
         try:
+            logger.info(f"Loading image from: {image_input}")
+            
             # Load image
             if image_input.startswith("http"):
                 response = requests.get(image_input)
@@ -45,24 +71,27 @@ class ExtractIngredientsTool():
                     raise FileNotFoundError(f"No file found at path: {image_input}")
                 img = Image.open(image_input)
 
-            # Initialize Gemini model with vision capability
-            # Note: Use 'gemini-1.5-flash' NOT 'models/gemini-1.5-flash'
-            model = genai.GenerativeModel('gemini-2.5-flash')
+            logger.info("Image loaded successfully")
+            
+            # Get the best available model
+            model = get_best_vision_model()
             
             # Create prompt
             prompt = """Analyze this image and extract all the ingredients or food items you can see.
             List each ingredient on a new line. Be specific and detailed.
             Only list the ingredients, nothing else."""
             
+            logger.info("Sending request to Gemini API...")
+            
             # Generate response
             response = model.generate_content([prompt, img])
             
-            logging.info(f"Gemini response: {response.text}")
+            logger.info(f"✓ Gemini response received: {response.text[:100]}...")
             return response.text
             
         except Exception as e:
-            logging.error(f"Error in extract_ingredient: {str(e)}")
-            raise
+            logger.error(f"Error in extract_ingredient: {str(e)}")
+            raise Exception(f"Failed to extract ingredients: {str(e)}")
 
 
 class FilterIngredientsTool:
@@ -75,6 +104,8 @@ class FilterIngredientsTool:
         :return: A list of cleaned and relevant ingredients.
         """
         try:
+            logger.info(f"Filtering ingredients from: {raw_ingredients[:100]}...")
+            
             # Split by newlines and commas, clean up
             ingredients = []
             for line in raw_ingredients.split('\n'):
@@ -91,11 +122,11 @@ class FilterIngredientsTool:
                     seen.add(item)
                     unique_ingredients.append(item)
             
-            logging.info(f"Filtered ingredients: {unique_ingredients}")
+            logger.info(f"✓ Filtered to {len(unique_ingredients)} ingredients: {unique_ingredients}")
             return unique_ingredients
             
         except Exception as e:
-            logging.error(f"Error in filter_ingredients: {str(e)}")
+            logger.error(f"Error in filter_ingredients: {str(e)}")
             return []
 
 
@@ -112,11 +143,13 @@ class DietaryFilterTool:
         try:
             # If no dietary restrictions are provided, return the original ingredients
             if not dietary_restrictions or dietary_restrictions.strip() == "":
-                logging.info("No dietary restrictions provided, returning all ingredients")
+                logger.info("No dietary restrictions provided, returning all ingredients")
                 return ingredients
 
-            # Initialize Gemini model
-            model = genai.GenerativeModel('gemini-2.5-flash')
+            logger.info(f"Filtering {len(ingredients)} ingredients for: {dietary_restrictions}")
+            
+            # Get the best available model
+            model = get_best_vision_model()
 
             # Create a prompt for filtering
             prompt = f"""You are an AI nutritionist specialized in dietary restrictions.
@@ -139,11 +172,11 @@ Compliant ingredients:"""
             # Parse the response
             filtered_list = [item.strip().lower() for item in filtered_text.split(',') if item.strip()]
             
-            logging.info(f"Filtered based on {dietary_restrictions}: {filtered_list}")
+            logger.info(f"✓ Filtered to {len(filtered_list)} compliant ingredients: {filtered_list}")
             return filtered_list if filtered_list else ingredients
             
         except Exception as e:
-            logging.error(f"Error in filter_based_on_restrictions: {str(e)}")
+            logger.error(f"Error in filter_based_on_restrictions: {str(e)}")
             return ingredients  # Return original if filtering fails
 
     
@@ -157,6 +190,8 @@ class NutrientAnalysisTool():
         :return: A string with nutrient breakdown and estimated calorie information.
         """
         try:
+            logger.info(f"Analyzing nutrition from image: {image_input}")
+            
             # Load image
             if image_input.startswith("http"):
                 response = requests.get(image_input)
@@ -167,8 +202,10 @@ class NutrientAnalysisTool():
                     raise FileNotFoundError(f"No file found at path: {image_input}")
                 img = Image.open(image_input)
 
-            # Initialize Gemini model
-            model = genai.GenerativeModel('gemini-2.5-flash')
+            logger.info("Image loaded, getting model...")
+            
+            # Get the best available model
+            model = get_best_vision_model()
             
             # Detailed nutritionist prompt
             prompt = """You are an expert nutritionist. Analyze the food in this image and provide a detailed nutritional assessment using the following format:
@@ -195,12 +232,14 @@ The nutritional information and calorie estimates provided are approximate and a
 Actual values may vary depending on factors such as portion size, specific ingredients, preparation methods, and individual variations. 
 For precise dietary advice or medical guidance, consult a qualified nutritionist or healthcare provider."""
 
+            logger.info("Sending nutrition analysis request to Gemini...")
+            
             # Generate response
             response = model.generate_content([prompt, img])
             
-            logging.info("Nutrient analysis completed")
+            logger.info("✓ Nutrition analysis completed")
             return response.text
             
         except Exception as e:
-            logging.error(f"Error in analyze_image: {str(e)}")
-            raise
+            logger.error(f"Error in analyze_image: {str(e)}")
+            raise Exception(f"Failed to analyze nutrition: {str(e)}")
