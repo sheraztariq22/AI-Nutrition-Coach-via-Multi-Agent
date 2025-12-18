@@ -22,7 +22,7 @@ CONFIG_DIR = os.path.join(os.path.dirname(__file__), "config")
 def get_gemini_llm(temperature: float = 0.7):
     """Initialize Google Gemini LLM with proper model name for CrewAI"""
     return ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
+        model="gemini-2.5-flash",
         temperature=temperature,
         google_api_key=os.getenv("GOOGLE_API_KEY"),
         convert_system_message_to_human=True  # Required for Gemini

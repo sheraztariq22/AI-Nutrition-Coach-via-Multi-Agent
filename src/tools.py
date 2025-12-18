@@ -47,7 +47,7 @@ class ExtractIngredientsTool():
 
             # Initialize Gemini model with vision capability
             # Note: Use 'gemini-1.5-flash' NOT 'models/gemini-1.5-flash'
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-2.5-flash')
             
             # Create prompt
             prompt = """Analyze this image and extract all the ingredients or food items you can see.
@@ -116,7 +116,7 @@ class DietaryFilterTool:
                 return ingredients
 
             # Initialize Gemini model
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-2.5-flash')
 
             # Create a prompt for filtering
             prompt = f"""You are an AI nutritionist specialized in dietary restrictions.
@@ -168,7 +168,7 @@ class NutrientAnalysisTool():
                 img = Image.open(image_input)
 
             # Initialize Gemini model
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-2.5-flash')
             
             # Detailed nutritionist prompt
             prompt = """You are an expert nutritionist. Analyze the food in this image and provide a detailed nutritional assessment using the following format:
