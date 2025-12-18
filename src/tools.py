@@ -46,7 +46,8 @@ class ExtractIngredientsTool():
                 img = Image.open(image_input)
 
             # Initialize Gemini model with vision capability
-            model = genai.GenerativeModel('')
+            # Note: Use 'gemini-1.5-flash' NOT 'models/gemini-1.5-flash'
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
             # Create prompt
             prompt = """Analyze this image and extract all the ingredients or food items you can see.
