@@ -2,8 +2,10 @@ import gradio as gr
 import base64
 import time
 import os
+import logging
 from dotenv import load_dotenv
 from src.crew import NourishBotRecipeCrew, NourishBotAnalysisCrew
+from src.tools import ExtractIngredientsTool, FilterIngredientsTool, DietaryFilterTool, NutrientAnalysisTool
 
 # Load environment variables
 load_dotenv()
@@ -143,39 +145,49 @@ def analyze_food(image, dietary_restrictions, workflow_type, progress=gr.Progres
             'workflow_type': workflow_type
         }
         
-        # Initialize the appropriate crew instance based on workflow type
-        if workflow_type == "recipe":
-            progress(0.1, desc="Initializing recipe generation...")
-            crew_instance = NourishBotRecipeCrew(
-                image_data=image_path,
-                dietary_restrictions=dietary_restrictions
-            )
-        elif workflow_type == "analysis":
-            progress(0.1, desc="Initializing nutritional analysis...")
-            crew_instance = NourishBotAnalysisCrew(
-                image_data=image_path
-            )
-        else:
-            return "❌ **Error:** Invalid workflow type. Choose 'recipe' or 'analysis'."
-
-        # Run the crew workflow and get the result
+        # Use direct tools instead of CrewAI pipeline to avoid LiteLLM issues
         progress(0.3, desc="Processing your request...")
-        crew_obj = crew_instance.crew()
         
-        progress(0.5, desc="Analyzing image with AI...")
-        final_output = crew_obj.kickoff(inputs=inputs)
-        
-        progress(0.9, desc="Formatting results...")
-        final_output = final_output.to_dict()
-
-        # Format output based on workflow type
-        if workflow_type == "recipe":
-            result = format_recipe_output(final_output)
-        elif workflow_type == "analysis":
-            result = format_analysis_output(final_output)
-        
-        progress(1.0, desc="Complete!")
-        return result
+        try:
+            if workflow_type == "recipe":
+                progress(0.6, desc="Extracting ingredients...")
+                raw_ingredients = ExtractIngredientsTool.extract_ingredient_direct(image_path)
+                filtered = FilterIngredientsTool.filter_ingredients_direct(raw_ingredients)
+                
+                if dietary_restrictions:
+                    progress(0.7, desc="Filtering by dietary restrictions...")
+                    filtered = DietaryFilterTool.filter_based_on_restrictions_direct(filtered, dietary_restrictions)
+                
+                # Format simple ingredient list
+                result = "## 🍽 Recipe Ingredients\n\n"
+                if filtered:
+                    result += "**Detected Ingredients:**\n\n"
+                    for i, item in enumerate(filtered, 1):
+                        result += f"{i}. {item}\n"
+                    result += "\n**Note:** For full recipes with instructions and detailed calorie estimates, you can extend this with a recipe generation service.\n"
+                else:
+                    result += "No ingredients could be detected. Please try with a clearer image of food items.\n"
+                
+                progress(1.0, desc="Complete!")
+                return result
+            
+            elif workflow_type == "analysis":
+                progress(0.6, desc="Analyzing nutritional content...")
+                analysis_text = NutrientAnalysisTool.analyze_image_direct(image_path)
+                result = "## 🥗 Nutritional Analysis\n\n" + analysis_text
+                progress(1.0, desc="Complete!")
+                return result
+                
+        except Exception as e:
+            logging.exception("Direct tools pipeline failed: %s", str(e))
+            error_msg = f"❌ **Error:** Failed to process image.\n\n"
+            error_msg += f"**Error Details:** {str(e)[:300]}\n\n"
+            error_msg += "**Troubleshooting:**\n"
+            error_msg += "- Ensure your Google API key is correctly set in the .env file\n"
+            error_msg += "- Check that you have enabled the Generative Language API\n"
+            error_msg += "- Verify the image is a valid food image\n"
+            error_msg += "- Try uploading a different image\n"
+            return error_msg
     
     except FileNotFoundError as e:
         return f"❌ **File Error:** {str(e)}"
@@ -281,4 +293,4 @@ with gr.Blocks(theme=gr.themes.Citrus(), css=css, js=js) as demo:
 
 # Launch the Gradio interface
 if __name__ == "__main__":
-    demo.launch(server_name="127.0.0.1", server_port=5000, share=True)
+    demo.launch(server_name="127.0.0.1", server_port=7860, share=True)

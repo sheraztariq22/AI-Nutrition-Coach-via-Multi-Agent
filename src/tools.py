@@ -27,20 +27,31 @@ genai.configure(api_key=GOOGLE_API_KEY)
 # Helper function to get the best available model
 def get_best_vision_model():
     """Find and return the best available Gemini vision model"""
+    # Try to list available models and find one that supports generateContent
+    try:
+        available_models = genai.list_models()
+        for model in available_models:
+            # Check if model supports generateContent
+            if 'generateContent' in model.supported_generation_methods:
+                model_name = model.name.replace('models/', '')
+                logger.info(f"✓ Found available model: {model_name}")
+                return genai.GenerativeModel(model_name)
+    except Exception as e:
+        logger.warning(f"Could not list models: {str(e)}")
+    
+    # Fallback to hardcoded list if listing fails
     model_priority = [
-        'gemini-1.5-flash-latest',
+        'gemini-2.0-flash',
         'gemini-1.5-flash',
-        'gemini-2.0-flash-exp',
-        'gemini-1.5-pro-latest',
         'gemini-1.5-pro',
-        'gemini-pro-vision'
+        'gemini-pro',
+        'gemini-pro-vision',
     ]
     
     for model_name in model_priority:
         try:
             model = genai.GenerativeModel(model_name)
-            # Test if model works with a simple prompt
-            logger.info(f"✓ Using Gemini model: {model_name}")
+            logger.info(f"✓ Using model: {model_name}")
             return model
         except Exception as e:
             logger.debug(f"Model {model_name} not available: {str(e)}")
@@ -50,10 +61,10 @@ def get_best_vision_model():
 
 
 class ExtractIngredientsTool():
-    @tool("Extract ingredients")
-    def extract_ingredient(image_input: str):
+    @staticmethod
+    def extract_ingredient_direct(image_input: str):
         """
-        Extract ingredients from a food item image using Google Gemini Vision.
+        Direct function to extract ingredients (without LangChain tool wrapper)
         
         :param image_input: The image file path (local) or URL (remote).
         :return: A list of ingredients extracted from the image.
@@ -93,12 +104,22 @@ class ExtractIngredientsTool():
             logger.error(f"Error in extract_ingredient: {str(e)}")
             raise Exception(f"Failed to extract ingredients: {str(e)}")
 
+    @tool("Extract ingredients")
+    def extract_ingredient(image_input: str):
+        """
+        Extract ingredients from a food item image using Google Gemini Vision.
+        
+        :param image_input: The image file path (local) or URL (remote).
+        :return: A list of ingredients extracted from the image.
+        """
+        return ExtractIngredientsTool.extract_ingredient_direct(image_input)
+
 
 class FilterIngredientsTool:
-    @tool("Filter ingredients")
-    def filter_ingredients(raw_ingredients: str) -> List[str]:
+    @staticmethod
+    def filter_ingredients_direct(raw_ingredients: str) -> List[str]:
         """
-        Processes the raw ingredient data and filters out non-food items or noise.
+        Direct function to filter ingredients (without LangChain tool wrapper)
         
         :param raw_ingredients: Raw ingredients as a string.
         :return: A list of cleaned and relevant ingredients.
@@ -129,12 +150,22 @@ class FilterIngredientsTool:
             logger.error(f"Error in filter_ingredients: {str(e)}")
             return []
 
+    @tool("Filter ingredients")
+    def filter_ingredients(raw_ingredients: str) -> List[str]:
+        """
+        Processes the raw ingredient data and filters out non-food items or noise.
+        
+        :param raw_ingredients: Raw ingredients as a string.
+        :return: A list of cleaned and relevant ingredients.
+        """
+        return FilterIngredientsTool.filter_ingredients_direct(raw_ingredients)
+
 
 class DietaryFilterTool:
-    @tool("Filter based on dietary restrictions")
-    def filter_based_on_restrictions(ingredients: List[str], dietary_restrictions: Optional[str] = None) -> List[str]:
+    @staticmethod
+    def filter_based_on_restrictions_direct(ingredients: List[str], dietary_restrictions: Optional[str] = None) -> List[str]:
         """
-        Uses Google Gemini to filter ingredients based on dietary restrictions.
+        Direct function to filter by dietary restrictions (without LangChain tool wrapper)
 
         :param ingredients: List of ingredients.
         :param dietary_restrictions: Dietary restrictions (e.g., vegan, gluten-free). Defaults to None.
@@ -179,12 +210,23 @@ Compliant ingredients:"""
             logger.error(f"Error in filter_based_on_restrictions: {str(e)}")
             return ingredients  # Return original if filtering fails
 
+    @tool("Filter based on dietary restrictions")
+    def filter_based_on_restrictions(ingredients: List[str], dietary_restrictions: Optional[str] = None) -> List[str]:
+        """
+        Uses Google Gemini to filter ingredients based on dietary restrictions.
+
+        :param ingredients: List of ingredients.
+        :param dietary_restrictions: Dietary restrictions (e.g., vegan, gluten-free). Defaults to None.
+        :return: Filtered list of ingredients that comply with the dietary restrictions.
+        """
+        return DietaryFilterTool.filter_based_on_restrictions_direct(ingredients, dietary_restrictions)
+
     
 class NutrientAnalysisTool():
-    @tool("Analyze nutritional values and calories of the dish from uploaded image")
-    def analyze_image(image_input: str):
+    @staticmethod
+    def analyze_image_direct(image_input: str):
         """
-        Provide a detailed nutrient breakdown and estimate the total calories using Google Gemini Vision.
+        Direct function to analyze nutrition (without LangChain tool wrapper)
         
         :param image_input: The image file path (local) or URL (remote).
         :return: A string with nutrient breakdown and estimated calorie information.
@@ -243,3 +285,13 @@ For precise dietary advice or medical guidance, consult a qualified nutritionist
         except Exception as e:
             logger.error(f"Error in analyze_image: {str(e)}")
             raise Exception(f"Failed to analyze nutrition: {str(e)}")
+
+    @tool("Analyze nutritional values and calories of the dish from uploaded image")
+    def analyze_image(image_input: str):
+        """
+        Provide a detailed nutrient breakdown and estimate the total calories using Google Gemini Vision.
+        
+        :param image_input: The image file path (local) or URL (remote).
+        :return: A string with nutrient breakdown and estimated calorie information.
+        """
+        return NutrientAnalysisTool.analyze_image_direct(image_input)
